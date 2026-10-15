@@ -1,0 +1,6 @@
+{
+  "summary": "Kế hoạch triển khai ứng dụng Android điều khiển quạt FujiHome bằng hồng ngoại chuẩn NEC (38kHz, địa chỉ 0x00) với 8 phím chức năng tối giản, phản hồi haptic, LED chớp tín hiệu và hỗ trợ chế độ mô phỏng.",
+  "updatedAt": "2026-10-15T14:39:49.223505555Z",
+  "requestFeedback": true,
+  "userFacing": true
+}

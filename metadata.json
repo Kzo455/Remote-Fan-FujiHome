@@ -1,0 +1,6 @@
+{
+  "name": "FujiHome Remote",
+  "description": "Điều khiển quạt FujiHome bằng tín hiệu hồng ngoại NEC 38kHz",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

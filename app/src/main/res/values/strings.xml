@@ -1,0 +1,31 @@
+<resources>
+    <string name="app_name">FujiHome Remote</string>
+    <string name="brand_title">FujiHome</string>
+    <string name="brand_subtitle">Điều Khiển Quạt Thông Minh</string>
+    
+    <string name="ir_status_ready">Mắt IR: Sẵn sàng</string>
+    <string name="ir_status_simulated">Chế độ mô phỏng</string>
+    <string name="ir_simulated_desc">Thiết bị không có mắt phát hồng ngoại phần cứng. Ứng dụng đang phát xung mô phỏng và rung haptic.</string>
+    
+    <!-- 8 Function Buttons -->
+    <string name="btn_power_off">Tắt quạt</string>
+    <string name="btn_speed_plus">Tăng gió</string>
+    <string name="btn_speed_minus">Giảm gió</string>
+    <string name="btn_turbo">Gió mạnh</string>
+    <string name="btn_sleep">Chế độ ngủ</string>
+    <string name="btn_horizontal">Quay trái / phải</string>
+    <string name="btn_vertical">Quay lên / xuống</string>
+    <string name="btn_timer">Hẹn giờ</string>
+
+    <string name="desc_power_off">Tắt hoàn toàn quạt về chế độ chờ</string>
+    <string name="desc_speed_plus">Tăng 1 nấc tốc độ quạt</string>
+    <string name="desc_speed_minus">Giảm 1 nấc tốc độ quạt</string>
+    <string name="desc_turbo">Chuyển ngay lên cấp độ gió tối đa</string>
+    <string name="desc_sleep">Chuyển chế độ quạt êm dịu ban đêm</string>
+    <string name="desc_horizontal">Bật/tắt đảo hướng xoay ngang</string>
+    <string name="desc_vertical">Bật/tắt đảo hướng gật đầu dọc</string>
+    <string name="desc_timer">Tăng mốc hẹn giờ tắt (1h, 2h, 4h, 8h)</string>
+    
+    <string name="status_last_sent">Lệnh vừa phát: %1$s</string>
+    <string name="status_nec_info">Chuẩn NEC 38kHz | Addr: 0x00</string>
+</resources>
