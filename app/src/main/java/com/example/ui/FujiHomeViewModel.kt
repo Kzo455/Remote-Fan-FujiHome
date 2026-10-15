@@ -14,6 +14,7 @@ import com.example.audio.IrTransmitVerifier
 import com.example.audio.IrVerificationSession
 import com.example.ir.FujiFanCommand
 import com.example.ir.TransmitResult
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
@@ -21,6 +22,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 
@@ -84,7 +86,7 @@ class FujiHomeViewModel(application: Application) : AndroidViewModel(application
 
     // Hàng đợi lệnh (FIFO Channel) đảm bảo nhận diện chính xác từng tiếng pip khi người dùng bấm nhanh
     private val commandChannel = Channel<FujiFanCommand>(capacity = Channel.UNLIMITED)
-    private var queueWorkerJob: Job? = null
+    private var queueProcessorJob: Job? = null
     private var flashJob: Job? = null
     private var timerConfirmJob: Job? = null
 
@@ -92,6 +94,24 @@ class FujiHomeViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch {
             verifier.verificationState.collect { vState ->
                 _uiState.update { it.copy(verificationState = vState) }
+            }
+        }
+        ensureQueueProcessorRunning()
+    }
+
+    private fun ensureQueueProcessorRunning() {
+        if (queueProcessorJob?.isActive != true) {
+            queueProcessorJob = viewModelScope.launch {
+                while (isActive) {
+                    try {
+                        val firstCommand = commandChannel.receive()
+                        processCommandBatch(firstCommand)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        Log.e("FujiHomeViewModel", "Lỗi trong vòng lặp xử lý hàng đợi", e)
+                    }
+                }
             }
         }
     }
@@ -125,7 +145,7 @@ class FujiHomeViewModel(application: Application) : AndroidViewModel(application
      * - Phản hồi rung xúc giác tức thì khi bấm phím
      * - Khi bấm nhanh liên tiếp (ví dụ ấn tăng tốc độ 2 lần), cả 2 lệnh đều được xếp hàng tuần tự
      * - Mỗi lệnh phát IR -> nhận 1 tiếng pip từ quạt -> cập nhật UI đúng 1 mức tương ứng
-     * - Tuyệt đối không hủy coroutine trước đó làm mất tiếng pip và sai lệch UI
+     * - Worker chạy vòng lặp liên tục chờ lệnh; không bị tình trạng kết thúc tiến trình làm kẹt lệnh
      */
     fun sendCommand(command: FujiFanCommand) {
         // 1. Phản hồi xúc giác tức thì khi ngón tay chạm phím
@@ -140,47 +160,55 @@ class FujiHomeViewModel(application: Application) : AndroidViewModel(application
         // 3. Đưa lệnh vào hàng đợi tuần tự
         commandChannel.trySend(command)
 
-        // 4. Khởi động Worker xử lý hàng đợi nếu chưa chạy
-        if (queueWorkerJob?.isActive != true) {
-            queueWorkerJob = viewModelScope.launch {
-                processCommandQueue()
-            }
-        }
+        // 4. Đảm bảo Worker xử lý hàng đợi luôn chạy
+        ensureQueueProcessorRunning()
     }
 
     /**
-     * Worker xử lý hàng đợi:
-     * Sử dụng phiên âm thanh liên tục (Audio Session) để không phải dừng/khởi tạo lại AudioRecord giữa các phím bấm nhanh.
+     * Xử lý một đợt lệnh:
+     * - Sử dụng phiên âm thanh liên tục (Audio Session) để không phải dừng/khởi tạo lại AudioRecord giữa các phím bấm nhanh.
+     * - Sau khi xử lý firstCommand, giữ session mở trong 650ms để nhận các lệnh bấm tiếp theo.
+     * - Nếu sau 650ms không có lệnh mới, session tự đóng giải phóng mic và vòng lặp chính quay về chờ lệnh mới.
+     * - Nếu lệnh mới đến đúng lúc session đang đóng, vòng lặp chính sẽ lập tức nhận lệnh ở vòng lặp tiếp theo, không bao giờ bị kẹt.
      */
-    private suspend fun processCommandQueue() {
+    private suspend fun processCommandBatch(firstCommand: FujiFanCommand) {
         if (_uiState.value.isAcousticVerificationEnabled && verifier.hasRecordPermission()) {
+            var firstExecuted = false
             try {
                 verifier.runVerificationSession { session ->
+                    executeCommandInSession(session, firstCommand)
+                    firstExecuted = true
+
                     while (true) {
                         // Chờ lệnh tiếp theo trong hàng đợi; nếu sau 650ms không có phím nào bấm thêm -> đóng session
-                        val command = withTimeoutOrNull(650) {
+                        val nextCommand = withTimeoutOrNull(650) {
                             commandChannel.receive()
                         } ?: break
 
-                        executeCommandInSession(session, command)
+                        executeCommandInSession(session, nextCommand)
                     }
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.e("FujiHomeViewModel", "Lỗi trong phiên xác thực âm thanh", e)
-                // Xử lý nốt các lệnh còn lại (nếu có)
+                if (!firstExecuted) {
+                    executeCommandDirect(firstCommand)
+                }
                 while (true) {
-                    val command = commandChannel.tryReceive().getOrNull() ?: break
-                    executeCommandDirect(command)
+                    val nextCommand = commandChannel.tryReceive().getOrNull() ?: break
+                    executeCommandDirect(nextCommand)
                 }
             }
         } else {
             // Chế độ không xác thực âm thanh hoặc chưa cấp mic
+            executeCommandDirect(firstCommand)
             while (true) {
-                val command = withTimeoutOrNull(500) {
+                val nextCommand = withTimeoutOrNull(500) {
                     commandChannel.receive()
                 } ?: break
 
-                executeCommandDirect(command)
+                executeCommandDirect(nextCommand)
             }
         }
     }

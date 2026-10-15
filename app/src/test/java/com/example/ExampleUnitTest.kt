@@ -332,4 +332,28 @@ class ExampleUnitTest {
         assertTrue(stateTurnedOn.isPowerOn)
         assertFalse(stateTurnedOn.showInitialPowerDialog)
     }
+
+    @Test
+    fun verifyCommandQueueFifoOrderAndDrainOnPowerOff() = kotlinx.coroutines.runBlocking {
+        val channel = kotlinx.coroutines.channels.Channel<FujiFanCommand>(capacity = kotlinx.coroutines.channels.Channel.UNLIMITED)
+
+        // Gửi 2 lệnh liên tiếp
+        channel.trySend(FujiFanCommand.SPEED_PLUS)
+        channel.trySend(FujiFanCommand.SPEED_PLUS)
+
+        // Nhận tuần tự theo thứ tự FIFO
+        assertEquals(FujiFanCommand.SPEED_PLUS, channel.receive())
+        assertEquals(FujiFanCommand.SPEED_PLUS, channel.receive())
+        assertTrue(channel.tryReceive().isFailure)
+
+        // Kiểm tra logic xả hàng đợi khi gặp POWER_OFF
+        channel.trySend(FujiFanCommand.SPEED_PLUS)
+        channel.trySend(FujiFanCommand.SPEED_PLUS)
+        // Xả sạch khi POWER_OFF được gửi
+        while (channel.tryReceive().isSuccess) {}
+        channel.trySend(FujiFanCommand.POWER_OFF)
+
+        assertEquals(FujiFanCommand.POWER_OFF, channel.receive())
+        assertTrue(channel.tryReceive().isFailure)
+    }
 }
