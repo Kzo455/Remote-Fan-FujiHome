@@ -9,6 +9,7 @@ private val AeroDarkColorScheme = darkColorScheme(
     onPrimary = AeroOnPrimary,
     primaryContainer = AeroPrimaryContainer,
     onPrimaryContainer = AeroOnPrimaryContainer,
+    inversePrimary = AeroInversePrimary,
     secondary = AeroSecondary,
     onSecondary = AeroOnSecondary,
     secondaryContainer = AeroSecondaryContainer,
@@ -16,16 +17,22 @@ private val AeroDarkColorScheme = darkColorScheme(
     tertiary = AeroTertiary,
     onTertiary = AeroOnTertiary,
     tertiaryContainer = AeroTertiaryContainer,
-    background = AeroSurface,
-    onBackground = AeroOnSurface,
+    onTertiaryContainer = AeroOnTertiaryContainer,
+    background = AeroBackground,
+    onBackground = AeroOnBackground,
     surface = AeroSurface,
     onSurface = AeroOnSurface,
     surfaceVariant = AeroSurfaceVariant,
     onSurfaceVariant = AeroOnSurfaceVariant,
+    inverseSurface = AeroInverseSurface,
+    inverseOnSurface = AeroInverseOnSurface,
+    surfaceTint = AeroSurfaceTint,
     outline = AeroOutline,
     outlineVariant = AeroOutlineVariant,
     error = AeroError,
-    onError = AeroOnError
+    onError = AeroOnError,
+    errorContainer = AeroErrorContainer,
+    onErrorContainer = AeroOnErrorContainer
 )
 
 @Composable

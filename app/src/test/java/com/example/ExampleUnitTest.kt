@@ -312,25 +312,13 @@ class ExampleUnitTest {
     }
 
     @Test
-    fun verifyInitialPowerDialogState() {
+    fun verifyPersistentDefaultState() {
         val defaultState = com.example.ui.FujiHomeUiState()
-        assertTrue(defaultState.showInitialPowerDialog)
-
-        // Khi người dùng chọn Tắt quạt
-        val stateTurnedOff = defaultState.copy(
-            isPowerOn = false,
-            showInitialPowerDialog = false
-        )
-        assertFalse(stateTurnedOff.isPowerOn)
-        assertFalse(stateTurnedOff.showInitialPowerDialog)
-
-        // Khi người dùng chọn Bật quạt
-        val stateTurnedOn = defaultState.copy(
-            isPowerOn = true,
-            showInitialPowerDialog = false
-        )
-        assertTrue(stateTurnedOn.isPowerOn)
-        assertFalse(stateTurnedOn.showInitialPowerDialog)
+        // Popup đã được xoá theo yêu cầu, trạng thái mặc định không hiển thị popup
+        assertFalse(defaultState.showInitialPowerDialog)
+        assertTrue(defaultState.isPowerOn)
+        assertEquals(4, defaultState.speedLevel)
+        assertEquals(com.example.ui.FanMode.NORMAL, defaultState.mode)
     }
 
     @Test

@@ -49,7 +49,7 @@ data class FujiHomeUiState(
     val isAcousticVerificationEnabled: Boolean = true,
     val verificationState: BeepDetectionState = BeepDetectionState.Idle,
     val longBeepNotification: String? = null, // Thông báo khi quạt kêu tiếng pip dài
-    val showInitialPowerDialog: Boolean = true // Popup hỏi trạng thái khi mở app
+    val showInitialPowerDialog: Boolean = false // Đã tắt popup theo yêu cầu thiết kế
 ) {
     val displayTimerHours: Int
         get() = if (isTimerSettingMode) pendingTimerHours else timerHours
@@ -66,6 +66,7 @@ data class FujiHomeUiState(
 class FujiHomeViewModel(application: Application) : AndroidViewModel(application) {
 
     private val verifier = IrTransmitVerifier(application)
+    private val prefs = application.getSharedPreferences("fuji_fan_state_prefs", Context.MODE_PRIVATE)
 
     private val vibrator: Vibrator? = try {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -80,9 +81,39 @@ class FujiHomeViewModel(application: Application) : AndroidViewModel(application
     }
 
     private val _uiState = MutableStateFlow(
-        FujiHomeUiState(isHardwareAvailable = verifier.irTransmitter.hasHardwareIrEmitter)
+        FujiHomeUiState(
+            isHardwareAvailable = verifier.irTransmitter.hasHardwareIrEmitter,
+            isPowerOn = prefs.getBoolean("is_power_on", true),
+            speedLevel = prefs.getInt("speed_level", 4).coerceIn(1, 8),
+            savedNormalSpeed = prefs.getInt("saved_normal_speed", 4).coerceIn(1, 8),
+            mode = try {
+                FanMode.valueOf(prefs.getString("fan_mode", FanMode.NORMAL.name) ?: FanMode.NORMAL.name)
+            } catch (_: Exception) {
+                FanMode.NORMAL
+            },
+            isHorizontalSwing = prefs.getBoolean("is_h_swing", false),
+            isVerticalSwing = prefs.getBoolean("is_v_swing", false),
+            timerHours = prefs.getInt("timer_hours", 0),
+            showInitialPowerDialog = false
+        )
     )
     val uiState: StateFlow<FujiHomeUiState> = _uiState.asStateFlow()
+
+    private fun persistState(state: FujiHomeUiState) {
+        try {
+            prefs.edit()
+                .putBoolean("is_power_on", state.isPowerOn)
+                .putInt("speed_level", state.speedLevel)
+                .putInt("saved_normal_speed", state.savedNormalSpeed)
+                .putString("fan_mode", state.mode.name)
+                .putBoolean("is_h_swing", state.isHorizontalSwing)
+                .putBoolean("is_v_swing", state.isVerticalSwing)
+                .putInt("timer_hours", state.timerHours)
+                .apply()
+        } catch (e: Exception) {
+            Log.e("FujiHomeViewModel", "Lỗi khi lưu trạng thái quạt vào SharedPreferences", e)
+        }
+    }
 
     // Hàng đợi lệnh (FIFO Channel) đảm bảo nhận diện chính xác từng tiếng pip khi người dùng bấm nhanh
     private val commandChannel = Channel<FujiFanCommand>(capacity = Channel.UNLIMITED)
@@ -134,6 +165,7 @@ class FujiHomeViewModel(application: Application) : AndroidViewModel(application
                 showInitialPowerDialog = false
             )
         }
+        persistState(_uiState.value)
     }
 
     fun dismissInitialPowerDialog() {
@@ -335,6 +367,7 @@ class FujiHomeViewModel(application: Application) : AndroidViewModel(application
                     longBeepNotification = notificationText
                 )
             }
+            persistState(_uiState.value)
 
             delay(3000)
             _uiState.update {
@@ -520,5 +553,6 @@ class FujiHomeViewModel(application: Application) : AndroidViewModel(application
                 }
             }
         }
+        persistState(_uiState.value)
     }
 }

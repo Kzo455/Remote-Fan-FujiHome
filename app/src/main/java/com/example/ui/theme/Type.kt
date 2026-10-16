@@ -94,3 +94,11 @@ val AppTypography = Typography(
         letterSpacing = 0.08.sp
     )
 )
+
+val LabelNumeric = TextStyle(
+    fontFamily = SpaceGrotesk,
+    fontWeight = FontWeight.Medium,
+    fontSize = 28.sp,
+    lineHeight = 32.sp,
+    letterSpacing = (-0.02).sp
+)

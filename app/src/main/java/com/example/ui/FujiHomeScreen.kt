@@ -4,6 +4,7 @@ import android.Manifest
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -30,8 +31,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.CompareArrows
 import androidx.compose.material.icons.filled.Add
@@ -47,7 +50,6 @@ import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.SwapVert
-import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -74,14 +76,12 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.audio.BeepDetectionState
 import com.example.ir.FujiFanCommand
+import com.example.ui.theme.AeroBackground
 import com.example.ui.theme.AeroOnPrimary
 import com.example.ui.theme.AeroOnSurface
 import com.example.ui.theme.AeroOnSurfaceVariant
@@ -90,7 +90,6 @@ import com.example.ui.theme.AeroPrimary
 import com.example.ui.theme.AeroPrimaryFixed
 import com.example.ui.theme.AeroSecondary
 import com.example.ui.theme.AeroSleepIndigo
-import com.example.ui.theme.AeroSurface
 import com.example.ui.theme.AeroSurfaceContainer
 import com.example.ui.theme.AeroSurfaceContainerHigh
 import com.example.ui.theme.AeroSurfaceContainerHighest
@@ -101,8 +100,10 @@ import com.example.ui.theme.Manrope
 import com.example.ui.theme.SpaceGrotesk
 
 /**
- * Giao diện Aero Minimalist IoT cho FujiHome Remote
- * Tích hợp nhận diện âm thanh tiếng pip 4020Hz xác nhận quạt đã nhận lệnh
+ * Giao diện Aero Minimalist IoT cho FujiHome Remote.
+ * Bố cục chuẩn xác theo thiết kế HTML Cockpit với HUD tốc độ, điều khiển Nguồn/Tăng/Giảm,
+ * cụm Turbo/Sleep và cụm Quay Ngang/Hẹn Giờ/Quay Dọc.
+ * Tự động ghi nhớ trạng thái quạt khi thoát app mà không cần popup xác nhận.
  */
 @Composable
 fun FujiHomeScreen(
@@ -124,7 +125,11 @@ fun FujiHomeScreen(
             .fillMaxSize()
             .background(
                 Brush.verticalGradient(
-                    colors = listOf(AeroSurfaceContainerLowest, AeroSurface, Color(0xFF060D1E))
+                    colors = listOf(
+                        Color(0xFF0B1120),
+                        AeroBackground,
+                        Color(0xFF060E20)
+                    )
                 )
             ),
         contentAlignment = Alignment.TopCenter
@@ -133,12 +138,13 @@ fun FujiHomeScreen(
             modifier = Modifier
                 .widthIn(max = 440.dp)
                 .fillMaxSize()
-                .padding(horizontal = 18.dp, vertical = 8.dp),
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp, vertical = 12.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.SpaceBetween
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             // 1. Header (Logo + Brand + Online Badge + Mic Toggle)
-            FujiHeader(
+            CockpitHeader(
                 isHardwareAvailable = uiState.isHardwareAvailable,
                 isLedFlashing = uiState.isLedFlashing,
                 isMicEnabled = uiState.isAcousticVerificationEnabled,
@@ -152,64 +158,56 @@ fun FujiHomeScreen(
                 }
             )
 
-            // 2. Fan Status HUD Card
-            FanStatusHudCard(
-                uiState = uiState,
-                onRequestMicPermission = { permissionLauncher.launch(Manifest.permission.RECORD_AUDIO) },
-                onRetry = { viewModel.retryLastCommand() }
+            // 2. HUD Cockpit Card (Speedometer, 5 status glyphs, Center dial, Timer & Wind descriptor)
+            HudCockpitCard(
+                uiState = uiState
             )
 
-            // 3. Central Power Glow Button
-            CentralGlowingPowerButton(
+            // 3. Middle Stepper Row: GIẢM - NGUỒN - TĂNG
+            PowerAndSpeedStepperCard(
                 isPowerOn = uiState.isPowerOn,
-                onTogglePower = { viewModel.sendCommand(FujiFanCommand.POWER_OFF) }
-            )
-
-            // 4. Combined Speed Controller Card (GIẢM & TĂNG)
-            SpeedControllerCard(
+                onTogglePower = { viewModel.sendCommand(FujiFanCommand.POWER_OFF) },
                 onSpeedDown = { viewModel.sendCommand(FujiFanCommand.SPEED_MINUS) },
                 onSpeedUp = { viewModel.sendCommand(FujiFanCommand.SPEED_PLUS) }
             )
 
-            // 5. Timer Row Card (Hẹn Giờ)
-            TimerRowCard(
-                timerHours = uiState.displayTimerHours,
-                isSettingMode = uiState.isTimerSettingMode,
-                onCycleTimer = { viewModel.sendCommand(FujiFanCommand.TIMER) }
-            )
-
-            // 6. 2x2 Tactical Grid (Ngang, Dọc, Turbo, Đêm)
-            TacticalGrid2x2(
+            // 4. Grid 2 Columns: Turbo & Chế Độ Đêm
+            TurboAndSleepRow(
                 uiState = uiState,
-                onSendCommand = { viewModel.sendCommand(it) }
+                onToggleTurbo = { viewModel.sendCommand(FujiFanCommand.TURBO) },
+                onToggleSleep = { viewModel.sendCommand(FujiFanCommand.SLEEP) }
             )
 
-            // 7. Discreet IR Ticker
-            DiscreetIrTicker(
+            // 5. Grid 3 Columns: Quay Ngang - Hẹn Giờ - Quay Dọc
+            MotionAndTimerRow(
+                uiState = uiState,
+                onToggleHorizontal = { viewModel.sendCommand(FujiFanCommand.HORIZONTAL) },
+                onCycleTimer = { viewModel.sendCommand(FujiFanCommand.TIMER) },
+                onToggleVertical = { viewModel.sendCommand(FujiFanCommand.VERTICAL) }
+            )
+
+            // 6. Acoustic Verification Feedback & IR NEC Ticker
+            CockpitAcousticFeedbackBanner(
+                verificationState = uiState.verificationState,
+                longBeepNotification = uiState.longBeepNotification,
+                isTimerSettingMode = uiState.isTimerSettingMode,
+                timerHours = uiState.displayTimerHours,
                 lastResult = uiState.lastResult,
-                isFlashing = uiState.isLedFlashing
+                isFlashing = uiState.isLedFlashing,
+                onRequestMicPermission = { permissionLauncher.launch(Manifest.permission.RECORD_AUDIO) },
+                onRetry = { viewModel.retryLastCommand() }
             )
-        }
 
-        // Popup hỏi nhanh trạng thái quạt khi mở ứng dụng (1. Tắt, 2. Bật)
-        if (uiState.showInitialPowerDialog) {
-            InitialPowerCheckDialog(
-                onSelectPowerState = { isOn ->
-                    viewModel.setInitialFanPower(isOn)
-                },
-                onDismiss = {
-                    viewModel.dismissInitialPowerDialog()
-                }
-            )
+            Spacer(modifier = Modifier.height(6.dp))
         }
     }
 }
 
 /**
- * Header: Logo quạt Cyan squircle + FujiHome SMART REMOTE + Mic Button + Pill ONLINE
+ * 1. Header: Fixed style header với squircle logo, FujiHome title, Smart Remote subtitle, Mic toggle và status pill.
  */
 @Composable
-private fun FujiHeader(
+private fun CockpitHeader(
     isHardwareAvailable: Boolean,
     isLedFlashing: Boolean,
     isMicEnabled: Boolean,
@@ -228,7 +226,7 @@ private fun FujiHeader(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 2.dp),
+            .height(56.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -242,11 +240,11 @@ private fun FujiHeader(
                     .size(36.dp)
                     .clip(RoundedCornerShape(12.dp))
                     .background(AeroPrimary.copy(alpha = 0.2f))
-                    .border(1.dp, AeroPrimary.copy(alpha = 0.4f), RoundedCornerShape(12.dp)),
+                    .border(1.dp, AeroPrimary.copy(alpha = 0.35f), RoundedCornerShape(12.dp)),
                 contentAlignment = Alignment.Center
             ) {
                 QuadBladeFan(
-                    modifier = Modifier.size(22.dp),
+                    modifier = Modifier.size(20.dp),
                     tint = AeroPrimary
                 )
             }
@@ -256,32 +254,32 @@ private fun FujiHeader(
                     text = "FujiHome",
                     fontFamily = SpaceGrotesk,
                     fontWeight = FontWeight.Bold,
-                    fontSize = 19.sp,
-                    color = AeroOnSurface,
-                    lineHeight = 21.sp
+                    fontSize = 20.sp,
+                    lineHeight = 22.sp,
+                    color = AeroOnSurface
                 )
                 Text(
-                    text = "SMART REMOTE",
+                    text = "Smart Remote",
                     fontFamily = SpaceGrotesk,
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 10.sp,
-                    letterSpacing = 1.sp,
+                    fontWeight = FontWeight.Medium,
+                    fontSize = 11.sp,
+                    letterSpacing = 0.8.sp,
                     color = AeroOnSurfaceVariant
                 )
             }
         }
 
+        // Action icons: Mic + Online Badge
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            // Nút Micro lắng nghe tiếng pip
             Surface(
                 shape = CircleShape,
-                color = if (isMicEnabled && hasMicPermission) AeroPrimary.copy(alpha = 0.2f) else AeroSurfaceContainer,
-                border = androidx.compose.foundation.BorderStroke(
+                color = if (isMicEnabled && hasMicPermission) AeroPrimary.copy(alpha = 0.18f) else AeroSurfaceContainer,
+                border = BorderStroke(
                     1.dp,
-                    if (isMicEnabled && hasMicPermission) AeroPrimary.copy(alpha = 0.5f) else AeroOutlineVariant.copy(alpha = 0.35f)
+                    if (isMicEnabled && hasMicPermission) AeroPrimary.copy(alpha = 0.55f) else AeroOutlineVariant.copy(alpha = 0.3f)
                 ),
                 modifier = Modifier
                     .size(32.dp)
@@ -290,21 +288,20 @@ private fun FujiHeader(
                 Box(contentAlignment = Alignment.Center) {
                     Icon(
                         imageVector = if (isMicEnabled && hasMicPermission) Icons.Default.Mic else Icons.Default.MicOff,
-                        contentDescription = "Bật/Tắt Micro nghe tiếng pip",
-                        tint = if (isMicEnabled && hasMicPermission) AeroPrimary else AeroOnSurfaceVariant,
+                        contentDescription = "Micro nghe tiếng pip",
+                        tint = if (isMicEnabled && hasMicPermission) AeroPrimary else AeroOnSurfaceVariant.copy(alpha = 0.6f),
                         modifier = Modifier.size(16.dp)
                     )
                 }
             }
 
-            // Pill Online
             Surface(
                 shape = RoundedCornerShape(9999.dp),
                 color = AeroSurfaceContainer,
-                border = androidx.compose.foundation.BorderStroke(1.dp, AeroOutlineVariant.copy(alpha = 0.35f))
+                border = BorderStroke(1.dp, AeroOutlineVariant.copy(alpha = 0.3f))
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
@@ -329,20 +326,19 @@ private fun FujiHeader(
 }
 
 /**
- * Card FAN STATUS HUD: Vòng cung đo, cánh quạt 4 cánh xoay, dòng xác nhận âm thanh Beep
+ * 2. HUD Cockpit Card:
+ * Khung thẻ với rãnh than chì, vòng cung arc phát sáng, cánh quạt xoay, và 2 thông số Hẹn giờ + Luồng gió.
  */
 @Composable
-private fun FanStatusHudCard(
-    uiState: FujiHomeUiState,
-    onRequestMicPermission: () -> Unit,
-    onRetry: () -> Unit
+private fun HudCockpitCard(
+    uiState: FujiHomeUiState
 ) {
     val infiniteTransition = rememberInfiniteTransition(label = "rotorSpin")
     val durationMillis = when {
         !uiState.isPowerOn -> 100000
-        uiState.mode == FanMode.TURBO -> 340
-        uiState.mode == FanMode.SLEEP -> 1700
-        else -> (2100 - (uiState.speedLevel * 210)).coerceAtLeast(360)
+        uiState.mode == FanMode.TURBO -> 320
+        uiState.mode == FanMode.SLEEP -> 1800
+        else -> (2100 - (uiState.speedLevel * 200)).coerceAtLeast(360)
     }
 
     val rotationAngle by infiniteTransition.animateFloat(
@@ -372,19 +368,24 @@ private fun FanStatusHudCard(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .shadow(16.dp, RoundedCornerShape(24.dp), ambientColor = Color.Black, spotColor = Color.Black),
-        shape = RoundedCornerShape(24.dp),
+            .shadow(
+                elevation = 20.dp,
+                shape = RoundedCornerShape(20.dp),
+                ambientColor = Color.Black.copy(alpha = 0.55f),
+                spotColor = Color.Black.copy(alpha = 0.55f)
+            ),
+        shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = AeroSurfaceContainerLow),
-        border = androidx.compose.foundation.BorderStroke(1.dp, AeroOutlineVariant.copy(alpha = 0.35f))
+        border = BorderStroke(1.dp, AeroOutlineVariant.copy(alpha = 0.25f))
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 18.dp, vertical = 12.dp),
+                .padding(18.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // Top HUD Row: Speedometer + HUD Title + 5 mini icons
+            // Top Bar of HUD: HUD COCKPIT + 5 Mini Status Glyphs
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -398,38 +399,67 @@ private fun FanStatusHudCard(
                         imageVector = Icons.Default.Speed,
                         contentDescription = null,
                         tint = AeroPrimary,
-                        modifier = Modifier.size(17.dp)
+                        modifier = Modifier.size(19.dp)
                     )
                     Text(
-                        text = "HUD",
+                        text = "HUD COCKPIT",
                         fontFamily = SpaceGrotesk,
                         fontWeight = FontWeight.Bold,
-                        fontSize = 12.sp,
+                        fontSize = 11.sp,
                         letterSpacing = 0.8.sp,
                         color = AeroPrimary
                     )
                 }
 
-                // 5 mini status glyphs
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                // 5 Status Glyphs Capsule
+                Surface(
+                    shape = RoundedCornerShape(9999.dp),
+                    color = AeroSurfaceContainer.copy(alpha = 0.6f),
+                    border = BorderStroke(1.dp, AeroOutlineVariant.copy(alpha = 0.2f))
                 ) {
-                    MiniIcon(Icons.Default.PowerSettingsNew, uiState.isPowerOn, AeroPrimary)
-                    MiniIcon(Icons.AutoMirrored.Filled.CompareArrows, uiState.isPowerOn && uiState.isHorizontalSwing, AeroPrimary)
-                    MiniIcon(Icons.Default.SwapVert, uiState.isPowerOn && uiState.isVerticalSwing, AeroPrimary)
-                    MiniIcon(Icons.Default.Bolt, uiState.isPowerOn && uiState.mode == FanMode.TURBO, AeroTurboAmber)
-                    MiniIcon(Icons.Default.Bedtime, uiState.isPowerOn && uiState.mode == FanMode.SLEEP, AeroSleepIndigo)
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        MiniGlyph(Icons.Default.PowerSettingsNew, uiState.isPowerOn, AeroPrimary)
+                        MiniGlyph(Icons.AutoMirrored.Filled.CompareArrows, uiState.isPowerOn && uiState.isHorizontalSwing, AeroPrimary)
+                        MiniGlyph(Icons.Default.SwapVert, uiState.isPowerOn && uiState.isVerticalSwing, AeroPrimary)
+                        MiniGlyph(Icons.Default.Bolt, uiState.isPowerOn && uiState.mode == FanMode.TURBO, AeroTurboAmber)
+                        MiniGlyph(Icons.Default.Bedtime, uiState.isPowerOn && uiState.mode == FanMode.SLEEP, AeroSleepIndigo)
+                    }
                 }
             }
 
-            // Central Dial
+            // Central Circular Arc Dial (w-52 h-52 = ~208dp)
             Box(
-                modifier = Modifier.size(150.dp),
+                modifier = Modifier.size(208.dp),
                 contentAlignment = Alignment.Center
             ) {
+                // Glow blob
+                if (uiState.isPowerOn) {
+                    Box(
+                        modifier = Modifier
+                            .size(208.dp)
+                            .clip(CircleShape)
+                            .background(
+                                Brush.radialGradient(
+                                    colors = listOf(
+                                        when (uiState.mode) {
+                                            FanMode.TURBO -> AeroTurboAmber.copy(alpha = 0.2f)
+                                            FanMode.SLEEP -> AeroSleepIndigo.copy(alpha = 0.2f)
+                                            else -> AeroPrimary.copy(alpha = 0.2f)
+                                        },
+                                        Color.Transparent
+                                    )
+                                )
+                            )
+                    )
+                }
+
+                // Dial SVG circle & active arc
                 Canvas(modifier = Modifier.fillMaxSize()) {
-                    val strokeWidth = 8.dp.toPx()
+                    val strokeWidth = 9.dp.toPx()
                     drawCircle(
                         color = AeroSurfaceContainerHigh,
                         style = Stroke(width = strokeWidth)
@@ -445,14 +475,14 @@ private fun FanStatusHudCard(
                     }
                 }
 
-                // Inner Capsule
+                // Inner Capsule (w-36 h-36 = ~144dp)
                 Box(
                     modifier = Modifier
-                        .size(114.dp)
+                        .size(144.dp)
                         .clip(CircleShape)
                         .background(AeroSurfaceContainer)
-                        .border(1.5.dp, arcColor.copy(alpha = 0.35f), CircleShape)
-                        .shadow(8.dp, CircleShape),
+                        .border(1.dp, AeroOutlineVariant.copy(alpha = 0.25f), CircleShape)
+                        .shadow(12.dp, CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
                     Column(
@@ -461,7 +491,7 @@ private fun FanStatusHudCard(
                     ) {
                         QuadBladeFan(
                             modifier = Modifier
-                                .size(38.dp)
+                                .size(44.dp)
                                 .rotate(if (uiState.isPowerOn) rotationAngle else 0f),
                             tint = if (uiState.isPowerOn) arcColor else AeroOnSurfaceVariant.copy(alpha = 0.35f)
                         )
@@ -473,23 +503,31 @@ private fun FanStatusHudCard(
                                 text = "TẮT",
                                 fontFamily = SpaceGrotesk,
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 18.sp,
+                                fontSize = 32.sp,
                                 color = AeroOnSurfaceVariant.copy(alpha = 0.45f)
+                            )
+                            Text(
+                                text = "STANDBY",
+                                fontFamily = SpaceGrotesk,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.sp,
+                                letterSpacing = 0.8.sp,
+                                color = AeroOutlineVariant
                             )
                         } else if (uiState.mode == FanMode.TURBO) {
                             Text(
                                 text = "TURBO",
                                 fontFamily = SpaceGrotesk,
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 17.sp,
+                                fontSize = 28.sp,
                                 color = AeroTurboAmber
                             )
                             Text(
-                                text = "TỐI ĐA",
+                                text = "TỐI ĐA GIÓ",
                                 fontFamily = SpaceGrotesk,
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 10.sp,
-                                letterSpacing = 1.sp,
+                                fontSize = 11.sp,
+                                letterSpacing = 0.8.sp,
                                 color = AeroTurboAmber
                             )
                         } else if (uiState.mode == FanMode.SLEEP) {
@@ -497,15 +535,15 @@ private fun FanStatusHudCard(
                                 text = "ĐÊM",
                                 fontFamily = SpaceGrotesk,
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 17.sp,
+                                fontSize = 28.sp,
                                 color = AeroSleepIndigo
                             )
                             Text(
-                                text = "ÊM ÁI",
+                                text = "ÊM DỊU 18dB",
                                 fontFamily = SpaceGrotesk,
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 10.sp,
-                                letterSpacing = 1.sp,
+                                fontSize = 11.sp,
+                                letterSpacing = 0.8.sp,
                                 color = AeroSleepIndigo
                             )
                         } else {
@@ -514,9 +552,9 @@ private fun FanStatusHudCard(
                                     text = "${uiState.speedLevel}",
                                     fontFamily = SpaceGrotesk,
                                     fontWeight = FontWeight.Bold,
-                                    fontSize = 28.sp,
+                                    fontSize = 42.sp,
                                     color = AeroOnSurface,
-                                    lineHeight = 30.sp
+                                    lineHeight = 42.sp
                                 )
                                 Text(
                                     text = " / 8",
@@ -524,15 +562,15 @@ private fun FanStatusHudCard(
                                     fontWeight = FontWeight.SemiBold,
                                     fontSize = 14.sp,
                                     color = AeroOnSurfaceVariant,
-                                    modifier = Modifier.padding(bottom = 3.dp)
+                                    modifier = Modifier.padding(bottom = 5.dp, start = 2.dp)
                                 )
                             }
                             Text(
                                 text = "CẤP ĐỘ",
                                 fontFamily = SpaceGrotesk,
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 10.sp,
-                                letterSpacing = 1.sp,
+                                fontSize = 11.sp,
+                                letterSpacing = 0.8.sp,
                                 color = AeroPrimary
                             )
                         }
@@ -540,145 +578,659 @@ private fun FanStatusHudCard(
                 }
             }
 
-            // Bottom HUD Row: Verification Feedback / Telemetry
-            AcousticVerificationFeedbackRow(
-                verificationState = uiState.verificationState,
-                longBeepNotification = uiState.longBeepNotification,
-                isTimerSettingMode = uiState.isTimerSettingMode,
-                timerHours = uiState.displayTimerHours,
-                windDescriptor = uiState.windDescriptor,
-                onRequestMicPermission = onRequestMicPermission,
-                onRetry = onRetry
-            )
-        }
-    }
-}
-
-/**
- * Hiển thị trạng thái phản hồi âm thanh (Beep 4020Hz) và xác nhận hẹn giờ
- */
-@Composable
-private fun AcousticVerificationFeedbackRow(
-    verificationState: BeepDetectionState,
-    longBeepNotification: String?,
-    isTimerSettingMode: Boolean,
-    timerHours: Int,
-    windDescriptor: String,
-    onRequestMicPermission: () -> Unit,
-    onRetry: () -> Unit
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        when {
-            // Ưu tiên 1: Thông báo quạt kêu tiếng pip dài xác nhận
-            longBeepNotification != null -> {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF10B981), modifier = Modifier.size(16.dp))
-                    Text(longBeepNotification, fontFamily = SpaceGrotesk, fontSize = 12.sp, color = Color(0xFF10B981), fontWeight = FontWeight.Bold)
-                }
-            }
-            // Ưu tiên 2: Đang trong phiên điều chỉnh hẹn giờ (chờ debounce 3.5s)
-            isTimerSettingMode -> {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Icon(Icons.Default.Schedule, contentDescription = null, tint = AeroTurboAmber, modifier = Modifier.size(15.dp))
-                    Text(
-                        text = "Đang chọn: ${timerHours}H (Chờ xác nhận...)",
-                        fontFamily = SpaceGrotesk,
-                        fontSize = 12.sp,
-                        color = AeroTurboAmber,
-                        fontWeight = FontWeight.Bold
+            // Bottom Row of HUD: Timer badge + Wind descriptor
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 6.dp),
+                horizontalArrangement = Arrangement.SpaceAround,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Schedule,
+                        contentDescription = null,
+                        tint = AeroPrimary,
+                        modifier = Modifier.size(19.dp)
                     )
-                }
-            }
-            verificationState is BeepDetectionState.Transmitting -> {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Icon(Icons.Default.Speed, contentDescription = null, tint = AeroPrimary, modifier = Modifier.size(15.dp))
-                    Text("Đang phát IR...", fontFamily = SpaceGrotesk, fontSize = 12.sp, color = AeroPrimary, fontWeight = FontWeight.Bold)
-                }
-            }
-            verificationState is BeepDetectionState.Listening -> {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Icon(Icons.Default.Mic, contentDescription = null, tint = AeroPrimary, modifier = Modifier.size(15.dp))
-                    Text("Đang nghe pip (4020Hz)...", fontFamily = SpaceGrotesk, fontSize = 12.sp, color = AeroPrimary, fontWeight = FontWeight.SemiBold)
-                }
-            }
-            verificationState is BeepDetectionState.BeepDetected -> {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF10B981), modifier = Modifier.size(16.dp))
-                    Text("Quạt đã nhận lệnh!", fontFamily = SpaceGrotesk, fontSize = 12.sp, color = Color(0xFF10B981), fontWeight = FontWeight.Bold)
-                }
-            }
-            verificationState is BeepDetectionState.NoBeepDetected -> {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    modifier = Modifier.clickable(onClick = onRetry)
-                ) {
-                    Icon(Icons.Default.Refresh, contentDescription = null, tint = AeroTurboAmber, modifier = Modifier.size(15.dp))
-                    Text("Chưa nghe pip • Thử lại ↺", fontFamily = SpaceGrotesk, fontSize = 12.sp, color = AeroTurboAmber, fontWeight = FontWeight.Bold)
-                }
-            }
-            verificationState is BeepDetectionState.Error -> {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    modifier = Modifier.clickable(onClick = onRequestMicPermission)
-                ) {
-                    Icon(Icons.Default.Warning, contentDescription = null, tint = AeroTurboAmber, modifier = Modifier.size(15.dp))
-                    Text("Bật quyền Mic 🎤", fontFamily = SpaceGrotesk, fontSize = 12.sp, color = AeroTurboAmber, fontWeight = FontWeight.Bold)
-                }
-            }
-            else -> {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Icon(Icons.Default.Schedule, contentDescription = null, tint = AeroPrimary, modifier = Modifier.size(16.dp))
                     Text(
-                        text = if (timerHours == 0) "HẸN GIỜ: TẮT" else "HẸN GIỜ: ${timerHours}H",
+                        text = if (uiState.displayTimerHours == 0) "TẮT" else "${uiState.displayTimerHours} GIỜ",
                         fontFamily = SpaceGrotesk,
                         fontWeight = FontWeight.SemiBold,
-                        fontSize = 12.sp,
+                        fontSize = 15.sp,
                         color = AeroOnSurface
                     )
                 }
-            }
-        }
 
-        // Right side: Wind mode
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            Icon(
-                imageVector = Icons.Default.Air,
-                contentDescription = null,
-                tint = AeroSecondary,
-                modifier = Modifier.size(16.dp)
-            )
-            Text(
-                text = windDescriptor,
-                fontFamily = Manrope,
-                fontWeight = FontWeight.SemiBold,
-                fontSize = 12.sp,
-                color = AeroSecondary
-            )
+                Box(
+                    modifier = Modifier
+                        .width(1.dp)
+                        .height(14.dp)
+                        .background(AeroOutlineVariant.copy(alpha = 0.4f))
+                )
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Air,
+                        contentDescription = null,
+                        tint = AeroSecondary,
+                        modifier = Modifier.size(19.dp)
+                    )
+                    Text(
+                        text = when {
+                            !uiState.isPowerOn -> "Đã Tắt"
+                            uiState.mode == FanMode.TURBO -> "Tối Đa"
+                            uiState.mode == FanMode.SLEEP -> "Êm Dịu 18dB"
+                            else -> "Tự Nhiên"
+                        },
+                        fontFamily = Manrope,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 14.sp,
+                        color = AeroSecondary
+                    )
+                }
+            }
         }
     }
 }
 
 @Composable
-private fun MiniIcon(icon: ImageVector, isActive: Boolean, activeColor: Color) {
+private fun MiniGlyph(icon: ImageVector, isActive: Boolean, activeColor: Color) {
     Icon(
         imageVector = icon,
         contentDescription = null,
-        tint = if (isActive) activeColor else AeroOnSurfaceVariant.copy(alpha = 0.3f),
-        modifier = Modifier.size(15.dp)
+        tint = if (isActive) activeColor else AeroOnSurfaceVariant.copy(alpha = 0.35f),
+        modifier = Modifier.size(16.dp)
     )
 }
 
 /**
- * Cánh quạt 4 cánh cong khí động học chuẩn như hình mẫu
+ * 3. Middle Stepper Row: GIẢM (phím trái) - NGUỒN (phím tròn giữa) - TĂNG (phím phải)
+ */
+@Composable
+private fun PowerAndSpeedStepperCard(
+    isPowerOn: Boolean,
+    onTogglePower: () -> Unit,
+    onSpeedDown: () -> Unit,
+    onSpeedUp: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = AeroSurfaceContainerLow),
+        border = BorderStroke(1.dp, AeroOutlineVariant.copy(alpha = 0.25f))
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(10.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Nút GIẢM (btn_speed_minus)
+            StepperSpeedButton(
+                modifier = Modifier
+                    .weight(1f)
+                    .testTag("btn_speed_minus"),
+                title = "GIẢM",
+                icon = Icons.Default.Remove,
+                onClick = onSpeedDown
+            )
+
+            // Nút NGUỒN tròn trung tâm (btn_power)
+            val pwrInteractionSource = remember { MutableInteractionSource() }
+            val isPwrPressed by pwrInteractionSource.collectIsPressedAsState()
+            val pwrScale by animateFloatAsState(
+                targetValue = if (isPwrPressed) 0.94f else 1.0f,
+                animationSpec = tween(120, easing = CubicBezierEasing(0.4f, 0.0f, 0.2f, 1.0f)),
+                label = "pwrScale"
+            )
+
+            Surface(
+                modifier = Modifier
+                    .scale(pwrScale)
+                    .size(92.dp)
+                    .testTag("btn_power")
+                    .clickable(
+                        interactionSource = pwrInteractionSource,
+                        indication = ripple(bounded = true, color = if (isPowerOn) Color.White else AeroPrimary),
+                        onClick = onTogglePower
+                    ),
+                shape = CircleShape,
+                color = if (isPowerOn) AeroPrimary else AeroSurfaceContainerHigh,
+                border = BorderStroke(
+                    width = 2.dp,
+                    color = if (isPowerOn) AeroPrimaryFixed else AeroOutlineVariant.copy(alpha = 0.45f)
+                ),
+                shadowElevation = if (isPowerOn) 16.dp else 4.dp
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxSize(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.PowerSettingsNew,
+                        contentDescription = "Bật/Tắt quạt",
+                        tint = if (isPowerOn) AeroOnPrimary else AeroOnSurfaceVariant,
+                        modifier = Modifier.size(36.dp)
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "NGUỒN",
+                        fontFamily = SpaceGrotesk,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 11.sp,
+                        letterSpacing = 1.sp,
+                        color = if (isPowerOn) AeroOnPrimary else AeroOnSurfaceVariant
+                    )
+                }
+            }
+
+            // Nút TĂNG (btn_speed_plus)
+            StepperSpeedButton(
+                modifier = Modifier
+                    .weight(1f)
+                    .testTag("btn_speed_plus"),
+                title = "TĂNG",
+                icon = Icons.Default.Add,
+                onClick = onSpeedUp
+            )
+        }
+    }
+}
+
+@Composable
+private fun StepperSpeedButton(
+    modifier: Modifier = Modifier,
+    title: String,
+    icon: ImageVector,
+    onClick: () -> Unit
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) 0.95f else 1.0f,
+        animationSpec = tween(120, easing = CubicBezierEasing(0.4f, 0.0f, 0.2f, 1.0f)),
+        label = "stepperScale"
+    )
+
+    Surface(
+        modifier = modifier
+            .scale(scale)
+            .height(96.dp)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = ripple(bounded = true, color = AeroPrimary),
+                onClick = onClick
+            ),
+        shape = RoundedCornerShape(16.dp),
+        color = AeroSurfaceContainer,
+        border = BorderStroke(1.dp, AeroOutlineVariant.copy(alpha = 0.2f))
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(AeroSurfaceContainerHigh),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = title,
+                    tint = AeroPrimary,
+                    modifier = Modifier.size(26.dp)
+                )
+            }
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = title,
+                fontFamily = SpaceGrotesk,
+                fontWeight = FontWeight.Bold,
+                fontSize = 15.sp,
+                color = AeroOnSurface
+            )
+        }
+    }
+}
+
+/**
+ * 4. Grid 2 Columns: Turbo & Chế Độ Đêm
+ */
+@Composable
+private fun TurboAndSleepRow(
+    uiState: FujiHomeUiState,
+    onToggleTurbo: () -> Unit,
+    onToggleSleep: () -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        // Turbo button
+        ModeGridButton(
+            modifier = Modifier
+                .weight(1f)
+                .testTag("btn_turbo"),
+            title = "Turbo",
+            subtitle = "Tối đa gió",
+            icon = Icons.Default.Bolt,
+            isActive = uiState.isPowerOn && uiState.mode == FanMode.TURBO,
+            activeColor = AeroTurboAmber,
+            onClick = onToggleTurbo
+        )
+
+        // Chế Độ Đêm button
+        ModeGridButton(
+            modifier = Modifier
+                .weight(1f)
+                .testTag("btn_sleep"),
+            title = "Chế Độ Đêm",
+            subtitle = "Êm dịu 18dB",
+            icon = Icons.Default.Bedtime,
+            isActive = uiState.isPowerOn && uiState.mode == FanMode.SLEEP,
+            activeColor = AeroSleepIndigo,
+            onClick = onToggleSleep
+        )
+    }
+}
+
+@Composable
+private fun ModeGridButton(
+    modifier: Modifier = Modifier,
+    title: String,
+    subtitle: String,
+    icon: ImageVector,
+    isActive: Boolean,
+    activeColor: Color,
+    onClick: () -> Unit
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) 0.95f else 1.0f,
+        animationSpec = tween(120, easing = CubicBezierEasing(0.4f, 0.0f, 0.2f, 1.0f)),
+        label = "modeScale"
+    )
+
+    Surface(
+        modifier = modifier
+            .scale(scale)
+            .height(96.dp)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = ripple(bounded = true, color = activeColor),
+                onClick = onClick
+            ),
+        shape = RoundedCornerShape(18.dp),
+        color = if (isActive) activeColor.copy(alpha = 0.14f) else AeroSurfaceContainer,
+        border = BorderStroke(
+            1.5.dp,
+            if (isActive) activeColor else AeroOutlineVariant.copy(alpha = 0.2f)
+        )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = title,
+                    tint = if (isActive) activeColor else AeroOnSurfaceVariant,
+                    modifier = Modifier.size(34.dp)
+                )
+
+                Column {
+                    Text(
+                        text = title,
+                        fontFamily = SpaceGrotesk,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp,
+                        color = if (isActive) activeColor else AeroOnSurface
+                    )
+                    Text(
+                        text = subtitle,
+                        fontFamily = SpaceGrotesk,
+                        fontWeight = FontWeight.Medium,
+                        fontSize = 11.sp,
+                        color = AeroOnSurfaceVariant
+                    )
+                }
+            }
+
+            // LED indicator
+            Box(
+                modifier = Modifier
+                    .size(12.dp)
+                    .clip(CircleShape)
+                    .background(if (isActive) activeColor else AeroSurfaceContainerHighest)
+            )
+        }
+    }
+}
+
+/**
+ * 5. Grid 3 Columns: Quay Ngang - Hẹn Giờ - Quay Dọc
+ */
+@Composable
+private fun MotionAndTimerRow(
+    uiState: FujiHomeUiState,
+    onToggleHorizontal: () -> Unit,
+    onCycleTimer: () -> Unit,
+    onToggleVertical: () -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        // Quay Ngang
+        TriActionItem(
+            modifier = Modifier
+                .weight(1f)
+                .testTag("btn_horizontal"),
+            title = "Quay Ngang",
+            icon = Icons.AutoMirrored.Filled.CompareArrows,
+            isActive = uiState.isPowerOn && uiState.isHorizontalSwing,
+            activeColor = AeroPrimary,
+            onClick = onToggleHorizontal
+        )
+
+        // Hẹn Giờ
+        TimerActionItem(
+            modifier = Modifier
+                .weight(1f)
+                .testTag("btn_timer"),
+            timerHours = uiState.displayTimerHours,
+            isSettingMode = uiState.isTimerSettingMode,
+            onClick = onCycleTimer
+        )
+
+        // Quay Dọc
+        TriActionItem(
+            modifier = Modifier
+                .weight(1f)
+                .testTag("btn_vertical"),
+            title = "Quay Dọc",
+            icon = Icons.Default.SwapVert,
+            isActive = uiState.isPowerOn && uiState.isVerticalSwing,
+            activeColor = AeroSecondary,
+            onClick = onToggleVertical
+        )
+    }
+}
+
+@Composable
+private fun TriActionItem(
+    modifier: Modifier = Modifier,
+    title: String,
+    icon: ImageVector,
+    isActive: Boolean,
+    activeColor: Color,
+    onClick: () -> Unit
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) 0.95f else 1.0f,
+        animationSpec = tween(120, easing = CubicBezierEasing(0.4f, 0.0f, 0.2f, 1.0f)),
+        label = "triScale"
+    )
+
+    Surface(
+        modifier = modifier
+            .scale(scale)
+            .height(96.dp)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = ripple(bounded = true, color = activeColor),
+                onClick = onClick
+            ),
+        shape = RoundedCornerShape(18.dp),
+        color = if (isActive) activeColor.copy(alpha = 0.14f) else AeroSurfaceContainer,
+        border = BorderStroke(
+            1.5.dp,
+            if (isActive) activeColor else AeroOutlineVariant.copy(alpha = 0.2f)
+        )
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(8.dp)
+        ) {
+            // LED Indicator dot top right
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .size(9.dp)
+                    .clip(CircleShape)
+                    .background(if (isActive) activeColor else AeroSurfaceContainerHighest)
+            )
+
+            Column(
+                modifier = Modifier.fillMaxSize(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = title,
+                    tint = if (isActive) activeColor else AeroOnSurfaceVariant,
+                    modifier = Modifier.size(32.dp)
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = title,
+                    fontFamily = SpaceGrotesk,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 13.sp,
+                    color = if (isActive) activeColor else AeroOnSurface
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TimerActionItem(
+    modifier: Modifier = Modifier,
+    timerHours: Int,
+    isSettingMode: Boolean,
+    onClick: () -> Unit
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) 0.95f else 1.0f,
+        animationSpec = tween(120, easing = CubicBezierEasing(0.4f, 0.0f, 0.2f, 1.0f)),
+        label = "timerScale"
+    )
+
+    val isActive = isSettingMode || timerHours > 0
+    val activeColor = if (isSettingMode) AeroTurboAmber else AeroPrimary
+
+    Surface(
+        modifier = modifier
+            .scale(scale)
+            .height(96.dp)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = ripple(bounded = true, color = activeColor),
+                onClick = onClick
+            ),
+        shape = RoundedCornerShape(18.dp),
+        color = if (isActive) activeColor.copy(alpha = 0.14f) else AeroSurfaceContainer,
+        border = BorderStroke(
+            1.5.dp,
+            if (isActive) activeColor else AeroOutlineVariant.copy(alpha = 0.2f)
+        )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Icon(
+                imageVector = Icons.Default.Schedule,
+                contentDescription = "Hẹn Giờ",
+                tint = if (isActive) activeColor else AeroOnSurfaceVariant,
+                modifier = Modifier.size(30.dp)
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "Hẹn Giờ",
+                fontFamily = SpaceGrotesk,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 13.sp,
+                color = AeroOnSurface
+            )
+            Spacer(modifier = Modifier.height(3.dp))
+            Surface(
+                shape = RoundedCornerShape(9999.dp),
+                color = AeroSurfaceContainerHigh
+            ) {
+                Text(
+                    text = when {
+                        isSettingMode && timerHours == 0 -> "TẮT (Chờ...)"
+                        isSettingMode -> "${timerHours}H (Chờ...)"
+                        timerHours == 0 -> "TẮT"
+                        else -> "${timerHours}H"
+                    },
+                    fontFamily = SpaceGrotesk,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 11.sp,
+                    color = if (isActive) activeColor else AeroPrimary,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 6. Cockpit Acoustic Feedback Banner & IR Ticker:
+ * Thông báo trạng thái nhận diện tiếng pip 4020Hz và mã HEX NEC 38kHz.
+ */
+@Composable
+private fun CockpitAcousticFeedbackBanner(
+    verificationState: BeepDetectionState,
+    longBeepNotification: String?,
+    isTimerSettingMode: Boolean,
+    timerHours: Int,
+    lastResult: com.example.ir.TransmitResult?,
+    isFlashing: Boolean,
+    onRequestMicPermission: () -> Unit,
+    onRetry: () -> Unit
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        color = AeroSurfaceContainerLow,
+        border = BorderStroke(1.dp, AeroOutlineVariant.copy(alpha = 0.2f))
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                when {
+                    longBeepNotification != null -> {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF10B981), modifier = Modifier.size(16.dp))
+                            Text(longBeepNotification, fontFamily = SpaceGrotesk, fontSize = 12.sp, color = Color(0xFF10B981), fontWeight = FontWeight.Bold)
+                        }
+                    }
+                    isTimerSettingMode -> {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Icon(Icons.Default.Schedule, contentDescription = null, tint = AeroTurboAmber, modifier = Modifier.size(16.dp))
+                            Text("Đang chọn: ${timerHours}H (Chờ xác nhận...)", fontFamily = SpaceGrotesk, fontSize = 12.sp, color = AeroTurboAmber, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                    verificationState is BeepDetectionState.Transmitting -> {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Icon(Icons.Default.Speed, contentDescription = null, tint = AeroPrimary, modifier = Modifier.size(16.dp))
+                            Text("Đang phát IR NEC 38kHz...", fontFamily = SpaceGrotesk, fontSize = 12.sp, color = AeroPrimary, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                    verificationState is BeepDetectionState.Listening -> {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Icon(Icons.Default.Mic, contentDescription = null, tint = AeroPrimary, modifier = Modifier.size(16.dp))
+                            Text("Đang nghe tiếng pip (4020Hz)...", fontFamily = SpaceGrotesk, fontSize = 12.sp, color = AeroPrimary, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                    verificationState is BeepDetectionState.BeepDetected -> {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF10B981), modifier = Modifier.size(16.dp))
+                            Text("Quạt đã nhận lệnh (1 tiếng pip) ✓", fontFamily = SpaceGrotesk, fontSize = 12.sp, color = Color(0xFF10B981), fontWeight = FontWeight.Bold)
+                        }
+                    }
+                    verificationState is BeepDetectionState.NoBeepDetected -> {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.clickable(onClick = onRetry)
+                        ) {
+                            Icon(Icons.Default.Refresh, contentDescription = null, tint = AeroTurboAmber, modifier = Modifier.size(16.dp))
+                            Text("Chưa nghe pip • Bấm thử lại ↺", fontFamily = SpaceGrotesk, fontSize = 12.sp, color = AeroTurboAmber, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                    verificationState is BeepDetectionState.Error -> {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.clickable(onClick = onRequestMicPermission)
+                        ) {
+                            Icon(Icons.Default.Warning, contentDescription = null, tint = AeroTurboAmber, modifier = Modifier.size(16.dp))
+                            Text("Cấp quyền Micro để đồng bộ âm thanh 🎤", fontFamily = SpaceGrotesk, fontSize = 12.sp, color = AeroTurboAmber, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                    else -> {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Icon(Icons.Default.CheckCircle, contentDescription = null, tint = AeroPrimary, modifier = Modifier.size(16.dp))
+                            Text("Hệ thống âm học sẵn sàng (Goertzel 4020Hz)", fontFamily = Manrope, fontSize = 12.sp, color = AeroOnSurfaceVariant)
+                        }
+                    }
+                }
+
+                Text(
+                    text = if (lastResult != null) lastResult.command.fullHex else "NEC 38kHz",
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Medium,
+                    fontSize = 11.sp,
+                    color = if (isFlashing) AeroPrimary else AeroOnSurfaceVariant.copy(alpha = 0.5f)
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Cánh quạt 4 cánh cong khí động học.
  */
 @Composable
 fun QuadBladeFan(
@@ -730,681 +1282,5 @@ fun QuadBladeFan(
 
         drawCircle(color = tint, radius = hubRadius)
         drawCircle(color = AeroSurfaceContainerLowest, radius = hubRadius * 0.45f)
-    }
-}
-
-/**
- * Nút Power trung tâm phát sáng mạnh mẽ
- */
-@Composable
-private fun CentralGlowingPowerButton(
-    isPowerOn: Boolean,
-    onTogglePower: () -> Unit
-) {
-    val interactionSource = remember { MutableInteractionSource() }
-    val isPressed by interactionSource.collectIsPressedAsState()
-    val scale by animateFloatAsState(
-        targetValue = if (isPressed) 0.92f else 1.0f,
-        label = "pwrScale"
-    )
-
-    Box(
-        modifier = Modifier.padding(vertical = 2.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        if (isPowerOn) {
-            Box(
-                modifier = Modifier
-                    .size(96.dp)
-                    .clip(CircleShape)
-                    .background(
-                        Brush.radialGradient(
-                            colors = listOf(AeroPrimary.copy(alpha = 0.5f), Color.Transparent)
-                        )
-                    )
-            )
-        }
-
-        Surface(
-            modifier = Modifier
-                .scale(scale)
-                .size(78.dp)
-                .testTag("btn_power")
-                .clickable(
-                    interactionSource = interactionSource,
-                    indication = ripple(bounded = true, color = if (isPowerOn) Color.White else AeroPrimary),
-                    onClick = onTogglePower
-                ),
-            shape = CircleShape,
-            color = if (isPowerOn) AeroPrimary else AeroSurfaceContainerHigh,
-            border = androidx.compose.foundation.BorderStroke(
-                width = 2.dp,
-                color = if (isPowerOn) AeroPrimaryFixed else AeroOutlineVariant.copy(alpha = 0.4f)
-            ),
-            shadowElevation = if (isPowerOn) 12.dp else 4.dp
-        ) {
-            Column(
-                modifier = Modifier.fillMaxSize(),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.PowerSettingsNew,
-                    contentDescription = "Bật/Tắt quạt",
-                    tint = if (isPowerOn) AeroOnPrimary else AeroOnSurfaceVariant,
-                    modifier = Modifier.size(32.dp)
-                )
-                Text(
-                    text = "POWER",
-                    fontFamily = SpaceGrotesk,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 10.sp,
-                    letterSpacing = 1.sp,
-                    color = if (isPowerOn) AeroOnPrimary else AeroOnSurfaceVariant
-                )
-            }
-        }
-    }
-}
-
-/**
- * Thẻ Điều Chỉnh Tốc Độ: Khung card hợp nhất chứa 2 nút GIẢM và TĂNG
- */
-@Composable
-private fun SpeedControllerCard(
-    onSpeedDown: () -> Unit,
-    onSpeedUp: () -> Unit
-) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = AeroSurfaceContainerLow),
-        border = androidx.compose.foundation.BorderStroke(1.dp, AeroOutlineVariant.copy(alpha = 0.3f))
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            HalfSpeedButton(
-                modifier = Modifier
-                    .weight(1f)
-                    .testTag("btn_speed_minus"),
-                title = "GIẢM",
-                icon = Icons.Default.Remove,
-                isLeftAligned = true,
-                onClick = onSpeedDown
-            )
-
-            HalfSpeedButton(
-                modifier = Modifier
-                    .weight(1f)
-                    .testTag("btn_speed_plus"),
-                title = "TĂNG",
-                icon = Icons.Default.Add,
-                isLeftAligned = false,
-                onClick = onSpeedUp
-            )
-        }
-    }
-}
-
-@Composable
-private fun HalfSpeedButton(
-    modifier: Modifier = Modifier,
-    title: String,
-    icon: ImageVector,
-    isLeftAligned: Boolean,
-    onClick: () -> Unit
-) {
-    val interactionSource = remember { MutableInteractionSource() }
-    val isPressed by interactionSource.collectIsPressedAsState()
-    val scale by animateFloatAsState(
-        targetValue = if (isPressed) 0.96f else 1.0f,
-        label = "btnScale"
-    )
-
-    Surface(
-        modifier = modifier
-            .scale(scale)
-            .height(58.dp)
-            .clickable(
-                interactionSource = interactionSource,
-                indication = ripple(bounded = true, color = AeroPrimary),
-                onClick = onClick
-            ),
-        shape = RoundedCornerShape(16.dp),
-        color = AeroSurfaceContainer,
-        border = androidx.compose.foundation.BorderStroke(
-            1.dp,
-            if (isPressed) AeroPrimary.copy(alpha = 0.5f) else AeroOutlineVariant.copy(alpha = 0.2f)
-        )
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            if (isLeftAligned) {
-                Box(
-                    modifier = Modifier
-                        .size(38.dp)
-                        .clip(CircleShape)
-                        .background(AeroSurfaceContainerHigh),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = icon,
-                        contentDescription = title,
-                        tint = AeroPrimary,
-                        modifier = Modifier.size(22.dp)
-                    )
-                }
-                Text(
-                    text = title,
-                    fontFamily = SpaceGrotesk,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 18.sp,
-                    color = AeroOnSurface
-                )
-            } else {
-                Text(
-                    text = title,
-                    fontFamily = SpaceGrotesk,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 18.sp,
-                    color = AeroOnSurface
-                )
-                Box(
-                    modifier = Modifier
-                        .size(38.dp)
-                        .clip(CircleShape)
-                        .background(AeroSurfaceContainerHigh),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = icon,
-                        contentDescription = title,
-                        tint = AeroPrimary,
-                        modifier = Modifier.size(22.dp)
-                    )
-                }
-            }
-        }
-    }
-}
-
-/**
- * Thẻ Hẹn Giờ Tắt: Squircle icon + Tiêu đề + Pill badge bên phải
- */
-@Composable
-private fun TimerRowCard(
-    timerHours: Int,
-    isSettingMode: Boolean,
-    onCycleTimer: () -> Unit
-) {
-    val interactionSource = remember { MutableInteractionSource() }
-    val isPressed by interactionSource.collectIsPressedAsState()
-    val scale by animateFloatAsState(
-        targetValue = if (isPressed) 0.98f else 1.0f,
-        label = "timerScale"
-    )
-
-    val isSavedActive = !isSettingMode && timerHours > 0
-
-    val borderColor = when {
-        isSettingMode -> AeroTurboAmber.copy(alpha = 0.6f)
-        isSavedActive -> AeroPrimary.copy(alpha = 0.5f)
-        else -> AeroOutlineVariant.copy(alpha = 0.3f)
-    }
-
-    val iconBgColor = when {
-        isSettingMode -> AeroTurboAmber.copy(alpha = 0.25f)
-        isSavedActive -> AeroPrimary
-        else -> AeroSurfaceContainerHigh
-    }
-
-    val iconColor = when {
-        isSettingMode -> AeroTurboAmber
-        isSavedActive -> AeroOnPrimary
-        else -> AeroPrimary
-    }
-
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .scale(scale)
-            .height(54.dp)
-            .testTag("btn_timer")
-            .clickable(
-                interactionSource = interactionSource,
-                indication = ripple(bounded = true, color = AeroPrimary),
-                onClick = onCycleTimer
-            ),
-        shape = RoundedCornerShape(20.dp),
-        color = AeroSurfaceContainerLow,
-        border = androidx.compose.foundation.BorderStroke(1.dp, borderColor)
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(38.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(iconBgColor),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Timer,
-                        contentDescription = "Hẹn giờ",
-                        tint = iconColor,
-                        modifier = Modifier.size(22.dp)
-                    )
-                }
-
-                Column {
-                    Text(
-                        text = "Hẹn Giờ",
-                        fontFamily = Manrope,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 15.sp,
-                        color = AeroOnSurface
-                    )
-                    if (isSettingMode) {
-                        Text(
-                            text = if (timerHours == 0) "Chờ tắt hẹn giờ..." else "Chờ lưu hẹn giờ...",
-                            fontFamily = SpaceGrotesk,
-                            fontSize = 10.sp,
-                            color = AeroTurboAmber,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-            }
-
-            Surface(
-                shape = RoundedCornerShape(9999.dp),
-                color = when {
-                    isSettingMode -> AeroTurboAmber.copy(alpha = 0.2f)
-                    isSavedActive -> AeroPrimary.copy(alpha = 0.2f)
-                    else -> AeroSurfaceContainer
-                },
-                border = androidx.compose.foundation.BorderStroke(
-                    1.dp,
-                    when {
-                        isSettingMode -> AeroTurboAmber.copy(alpha = 0.7f)
-                        isSavedActive -> AeroPrimary.copy(alpha = 0.6f)
-                        else -> AeroOutlineVariant.copy(alpha = 0.3f)
-                    }
-                )
-            ) {
-                Text(
-                    text = when {
-                        isSettingMode && timerHours == 0 -> "0 Giờ (Chờ...)"
-                        isSettingMode -> "${timerHours} Giờ (Chờ...)"
-                        timerHours == 0 -> "0 Giờ"
-                        else -> "${timerHours} Giờ"
-                    },
-                    fontFamily = SpaceGrotesk,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 12.sp,
-                    color = when {
-                        isSettingMode -> AeroTurboAmber
-                        isSavedActive -> AeroPrimary
-                        else -> AeroOnSurfaceVariant
-                    },
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 5.dp)
-                )
-            }
-        }
-    }
-}
-
-/**
- * Lưới 4 nút điều khiển 2x2: Ngang, Dọc, Turbo, Đêm
- */
-@Composable
-private fun TacticalGrid2x2(
-    uiState: FujiHomeUiState,
-    onSendCommand: (FujiFanCommand) -> Unit
-) {
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            GridCardButton(
-                modifier = Modifier
-                    .weight(1f)
-                    .testTag("btn_horizontal"),
-                title = "Ngang",
-                icon = Icons.AutoMirrored.Filled.CompareArrows,
-                isActive = uiState.isPowerOn && uiState.isHorizontalSwing,
-                activeColor = AeroPrimary,
-                onClick = { onSendCommand(FujiFanCommand.HORIZONTAL) }
-            )
-
-            GridCardButton(
-                modifier = Modifier
-                    .weight(1f)
-                    .testTag("btn_vertical"),
-                title = "Dọc",
-                icon = Icons.Default.SwapVert,
-                isActive = uiState.isPowerOn && uiState.isVerticalSwing,
-                activeColor = AeroPrimary,
-                onClick = { onSendCommand(FujiFanCommand.VERTICAL) }
-            )
-        }
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            GridCardButton(
-                modifier = Modifier
-                    .weight(1f)
-                    .testTag("btn_turbo"),
-                title = "Turbo",
-                icon = Icons.Default.Bolt,
-                isActive = uiState.isPowerOn && uiState.mode == FanMode.TURBO,
-                activeColor = AeroTurboAmber,
-                onClick = { onSendCommand(FujiFanCommand.TURBO) }
-            )
-
-            GridCardButton(
-                modifier = Modifier
-                    .weight(1f)
-                    .testTag("btn_sleep"),
-                title = "Đêm",
-                icon = Icons.Default.Bedtime,
-                isActive = uiState.isPowerOn && uiState.mode == FanMode.SLEEP,
-                activeColor = AeroSleepIndigo,
-                onClick = { onSendCommand(FujiFanCommand.SLEEP) }
-            )
-        }
-    }
-}
-
-@Composable
-private fun GridCardButton(
-    modifier: Modifier = Modifier,
-    title: String,
-    icon: ImageVector,
-    isActive: Boolean,
-    activeColor: Color,
-    onClick: () -> Unit
-) {
-    val interactionSource = remember { MutableInteractionSource() }
-    val isPressed by interactionSource.collectIsPressedAsState()
-    val scale by animateFloatAsState(
-        targetValue = if (isPressed) 0.95f else 1.0f,
-        label = "gridScale"
-    )
-
-    Surface(
-        modifier = modifier
-            .scale(scale)
-            .height(68.dp)
-            .clickable(
-                interactionSource = interactionSource,
-                indication = ripple(bounded = true, color = activeColor),
-                onClick = onClick
-            ),
-        shape = RoundedCornerShape(18.dp),
-        color = if (isActive) activeColor.copy(alpha = 0.16f) else AeroSurfaceContainerLow,
-        border = androidx.compose.foundation.BorderStroke(
-            width = if (isActive || isPressed) 1.5.dp else 1.dp,
-            color = if (isActive || isPressed) activeColor else AeroOutlineVariant.copy(alpha = 0.25f)
-        )
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(vertical = 10.dp, horizontal = 12.dp)
-        ) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .size(6.dp)
-                    .clip(CircleShape)
-                    .background(if (isActive) activeColor else AeroSurfaceContainerHighest)
-            )
-
-            Column(
-                modifier = Modifier.fillMaxSize(),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-            ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = title,
-                    tint = if (isActive) activeColor else AeroOnSurfaceVariant,
-                    modifier = Modifier.size(26.dp)
-                )
-
-                Spacer(modifier = Modifier.height(4.dp))
-
-                Text(
-                    text = title,
-                    fontFamily = SpaceGrotesk,
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 13.sp,
-                    color = if (isActive) activeColor else AeroOnSurface
-                )
-            }
-        }
-    }
-}
-
-/**
- * Dòng ticker nhỏ gọn ở chân màn hình
- */
-@Composable
-private fun DiscreetIrTicker(
-    lastResult: com.example.ir.TransmitResult?,
-    isFlashing: Boolean
-) {
-    Text(
-        text = if (lastResult != null) {
-            "${lastResult.command.fullHex} • 38kHz"
-        } else {
-            "NEC 38kHz • Addr: 0x00"
-        },
-        fontFamily = FontFamily.Monospace,
-        fontWeight = FontWeight.Medium,
-        fontSize = 10.sp,
-        color = if (isFlashing) AeroPrimary else AeroOnSurfaceVariant.copy(alpha = 0.45f),
-        modifier = Modifier.padding(bottom = 2.dp)
-    )
-}
-
-/**
- * Popup hỏi nhanh người dùng quạt đang bật hay tắt khi mở ứng dụng
- */
-@Composable
-private fun InitialPowerCheckDialog(
-    onSelectPowerState: (isOn: Boolean) -> Unit,
-    onDismiss: () -> Unit
-) {
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(dismissOnBackPress = true, dismissOnClickOutside = false)
-    ) {
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp),
-            shape = RoundedCornerShape(24.dp),
-            colors = CardDefaults.cardColors(containerColor = AeroSurfaceContainerHigh),
-            border = BorderStroke(1.dp, AeroOutlineVariant)
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                // Biểu tượng quạt trung tâm với hiệu ứng nền AeroPrimary
-                Box(
-                    modifier = Modifier
-                        .size(56.dp)
-                        .clip(CircleShape)
-                        .background(AeroPrimary.copy(alpha = 0.12f))
-                        .border(1.dp, AeroPrimary.copy(alpha = 0.35f), CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Air,
-                        contentDescription = null,
-                        tint = AeroPrimary,
-                        modifier = Modifier.size(28.dp)
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                Text(
-                    text = "Trạng thái quạt hiện tại",
-                    fontFamily = SpaceGrotesk,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 20.sp,
-                    color = AeroOnSurface,
-                    textAlign = TextAlign.Center
-                )
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Text(
-                    text = "Quạt của bạn hiện đang bật hay tắt?",
-                    fontFamily = Manrope,
-                    fontSize = 14.sp,
-                    color = AeroOnSurfaceVariant,
-                    textAlign = TextAlign.Center
-                )
-
-                Spacer(modifier = Modifier.height(24.dp))
-
-                // Lựa chọn 1: TẮT
-                Surface(
-                    onClick = { onSelectPowerState(false) },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("power_status_off_button"),
-                    shape = RoundedCornerShape(16.dp),
-                    color = Color(0xFF23171B),
-                    border = BorderStroke(1.dp, Color(0xFF6E2A38).copy(alpha = 0.7f))
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 18.dp, vertical = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Start
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFFE53935).copy(alpha = 0.18f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.PowerSettingsNew,
-                                contentDescription = null,
-                                tint = Color(0xFFFF5252),
-                                modifier = Modifier.size(22.dp)
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.width(14.dp))
-
-                        Column {
-                            Text(
-                                text = "1. Tắt",
-                                fontFamily = SpaceGrotesk,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 16.sp,
-                                color = AeroOnSurface
-                            )
-                            Text(
-                                text = "Quạt hiện đang tắt nguồn",
-                                fontFamily = Manrope,
-                                fontSize = 12.sp,
-                                color = AeroOnSurfaceVariant
-                            )
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                // Lựa chọn 2: BẬT
-                Surface(
-                    onClick = { onSelectPowerState(true) },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("power_status_on_button"),
-                    shape = RoundedCornerShape(16.dp),
-                    color = Color(0xFF0F2B36),
-                    border = BorderStroke(1.5.dp, AeroPrimary.copy(alpha = 0.85f))
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 18.dp, vertical = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Start
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(CircleShape)
-                                .background(AeroPrimary.copy(alpha = 0.22f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.CheckCircle,
-                                contentDescription = null,
-                                tint = AeroPrimary,
-                                modifier = Modifier.size(22.dp)
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.width(14.dp))
-
-                        Column {
-                            Text(
-                                text = "2. Bật",
-                                fontFamily = SpaceGrotesk,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 16.sp,
-                                color = AeroPrimary
-                            )
-                            Text(
-                                text = "Quạt hiện đang chạy",
-                                fontFamily = Manrope,
-                                fontSize = 12.sp,
-                                color = AeroOnSurfaceVariant
-                            )
-                        }
-                    }
-                }
-            }
-        }
     }
 }
